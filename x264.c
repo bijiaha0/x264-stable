@@ -1383,6 +1383,9 @@ static int parse_enum_value( const char *arg, const char * const *names, int *ds
     return -1;
 }
 
+/*
+ * 功能：parse()解析输入的命令行参数，存储于argv[]中
+ * */
 static int parse( int argc, char **argv, x264_param_t *param, cli_opt_t *opt )
 {
     char *input_filename = NULL;
@@ -1406,6 +1409,7 @@ static int parse( int argc, char **argv, x264_param_t *param, cli_opt_t *opt )
     /* Presets are applied before all other options. */
     for( optind = 0;; )
     {
+        //通过getopt_long()解析通过命令行传递来的存储在argv[]中的参数，并作相应的设置工作
         int c = getopt_long( argc, argv, short_options, long_options, NULL );
         if( c == -1 )
             break;
@@ -1420,6 +1424,7 @@ static int parse( int argc, char **argv, x264_param_t *param, cli_opt_t *opt )
     if( preset && !strcasecmp( preset, "placebo" ) )
         b_turbo = 0;
 
+    //x264_param_default_preset()是一个libx264的API，用于设置x264的preset和tune。
     if( (preset || tune) && x264_param_default_preset( param, preset, tune ) < 0 )
         return -1;
 
@@ -1448,6 +1453,7 @@ static int parse( int argc, char **argv, x264_param_t *param, cli_opt_t *opt )
 
         switch( c )
         {
+            //"-h"帮助菜单
             case 'h':
                 help( &defaults, 0 );
                 exit(0);
@@ -1457,6 +1463,8 @@ static int parse( int argc, char **argv, x264_param_t *param, cli_opt_t *opt )
             case OPT_FULLHELP:
                 help( &defaults, 2 );
                 exit(0);
+
+            //"-V"打印版本信息
             case 'V':
                 print_version_info();
                 exit(0);
@@ -1466,6 +1474,8 @@ static int parse( int argc, char **argv, x264_param_t *param, cli_opt_t *opt )
             case OPT_SEEK:
                 opt->i_seek = X264_MAX( atoi( optarg ), 0 );
                 break;
+
+            //"-o"输出文件路径
             case 'o':
                 output_filename = optarg;
                 break;
@@ -1494,6 +1504,8 @@ static int parse( int argc, char **argv, x264_param_t *param, cli_opt_t *opt )
             case OPT_QUIET:
                 cli_log_level = param->i_log_level = X264_LOG_NONE;
                 break;
+
+            //"-v"
             case 'v':
                 cli_log_level = param->i_log_level = X264_LOG_DEBUG;
                 break;
@@ -1516,6 +1528,8 @@ static int parse( int argc, char **argv, x264_param_t *param, cli_opt_t *opt )
             case OPT_SLOWFIRSTPASS:
                 b_turbo = 0;
                 break;
+
+            //"-r"
             case 'r':
                 b_user_ref = 1;
                 goto generic_option;
@@ -1542,15 +1556,19 @@ static int parse( int argc, char **argv, x264_param_t *param, cli_opt_t *opt )
             case OPT_VIDEO_FILTER:
                 vid_filters = optarg;
                 break;
+            //输入文件格式
             case OPT_INPUT_FMT:
                 input_opt.format = optarg;
                 break;
+            //输入分辨率
             case OPT_INPUT_RES:
                 input_opt.resolution = optarg;
                 break;
+            //输入色域
             case OPT_INPUT_CSP:
                 input_opt.colorspace = optarg;
                 break;
+            //输入颜色位深
             case OPT_INPUT_DEPTH:
                 input_opt.bit_depth = atoi( optarg );
                 break;
@@ -1596,6 +1614,9 @@ generic_option:
                     }
                 }
 
+                //解析以字符串方式输入的参数
+                //即选项名称和选项值都是字符串
+                //实质就是通过strcmp()方法
                 b_error |= x264_param_parse( param, long_options[long_options_index].name, optarg );
             }
         }
@@ -1620,10 +1641,12 @@ generic_option:
     FAIL_IF_ERROR( optind > argc - 1 || !output_filename, "No %s file. Run x264 --help for a list of options.\n",
                    optind > argc - 1 ? "input" : "output" );
 
+    //根据文件名的后缀确定输出的文件格式（raw H264，flv，mp4...）
     if( select_output( muxer, output_filename, param ) )
         return -1;
     FAIL_IF_ERROR( cli_output.open_file( output_filename, &opt->hout, &output_opt ), "could not open output file `%s'\n", output_filename );
 
+    //输入文件路径
     input_filename = argv[optind++];
     video_info_t info = {0};
     char demuxername[5];
@@ -1646,6 +1669,7 @@ generic_option:
     input_opt.progress = opt->b_progress;
     input_opt.output_csp = output_csp;
 
+    //设置输入文件的格式（yuv，y4m...）
     if( select_input( demuxer, demuxername, input_filename, &opt->hin, &info, &input_opt ) )
         return -1;
 
@@ -1740,6 +1764,8 @@ generic_option:
     if( input_opt.input_range != RANGE_AUTO )
         info.fullrange = input_opt.input_range;
 
+    //初始化滤镜filter
+    //filter可以认为是一种“扩展”了的输入源
     if( init_vid_filters( vid_filters, &opt->hin, &info, param, output_csp ) )
         return -1;
 
