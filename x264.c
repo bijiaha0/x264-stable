@@ -1874,6 +1874,11 @@ static void parse_qpfile( cli_opt_t *opt, x264_picture_t *pic, int i_frame )
     }
 }
 
+/************====== 编码函数 ======************/
+/*
+功能：encode_frame()内部调用x264_encoder_encode()完成编码工作，
+      调用输出格式对应cli_output_t结构体的write_frame()完成了输出工作。
+*/
 static int encode_frame( x264_t *h, hnd_t hout, x264_picture_t *pic, int64_t *last_dts )
 {
     x264_picture_t pic_out;
@@ -1881,12 +1886,18 @@ static int encode_frame( x264_t *h, hnd_t hout, x264_picture_t *pic, int64_t *la
     int i_nal;
     int i_frame_size = 0;
 
+    //编码API
+    //编码x264_picture_t为x264_nal_t
     i_frame_size = x264_encoder_encode( h, &nal, &i_nal, pic, &pic_out );
 
     FAIL_IF_ERROR( i_frame_size < 0, "x264_encoder_encode failed\n" );
 
     if( i_frame_size )
     {
+
+        //通过cli_output_t中的方法输出
+        //输出raw H.264流的话，等同于直接fwrite()
+        //其他封装格式，则还需进行一定的封装
         i_frame_size = cli_output.write_frame( hout, nal[0].p_payload, i_frame_size, &pic_out );
         *last_dts = pic_out.i_dts;
     }
@@ -1942,6 +1953,9 @@ do\
     }\
 } while( 0 )
 
+/*
+功能：编码（在内部有一个循环用于一帧一帧编码）
+*/
 static int encode( x264_param_t *param, cli_opt_t *opt )
 {
     x264_t *h = NULL;
@@ -1980,13 +1994,18 @@ static int encode( x264_param_t *param, cli_opt_t *opt )
         param->i_timebase_den = param->i_fps_num * pulldown->fps_factor;
     }
 
+    // 打开编码器
     h = x264_encoder_open( param );
     FAIL_IF_ERROR2( !h, "x264_encoder_open failed\n" );
 
+    //获得参数
     x264_encoder_parameters( h, param );
 
+    //一些不是裸流的封装格式（FLV，MP4等）需要一些参数，例如宽高等等
+    //cli_output_t是代表输出媒体文件的结构体
     FAIL_IF_ERROR2( cli_output.set_param( opt->hout, param ), "can't set outfile param\n" );
 
+    //计时开始
     i_start = x264_mdate();
 
     /* ticks/frame = ticks/second / frames/second */
@@ -1994,13 +2013,18 @@ static int encode( x264_param_t *param, cli_opt_t *opt )
     FAIL_IF_ERROR2( ticks_per_frame < 1 && !param->b_vfr_input, "ticks_per_frame invalid: %"PRId64"\n", ticks_per_frame );
     ticks_per_frame = X264_MAX( ticks_per_frame, 1 );
 
+    //如果不是在每个keyframe前面都增加SPS/PPS/SEI的话，就在整个码流前面加SPS/PPS/SEI
+    //Header指的就是SPS/PPS/SEI
     if( !param->b_repeat_headers )
     {
         // Write SPS/PPS/SEI
         x264_nal_t *headers;
         int i_nal;
 
+        //获得文件头（SPS、PPS、SEI）
         FAIL_IF_ERROR2( x264_encoder_headers( h, &headers, &i_nal ) < 0, "x264_encoder_headers failed\n" );
+
+        //把文件头写入输出文件
         FAIL_IF_ERROR2( (i_file = cli_output.write_headers( opt->hout, headers )) < 0, "error writing headers to output file\n" );
     }
 
@@ -2008,11 +2032,19 @@ static int encode( x264_param_t *param, cli_opt_t *opt )
         fprintf( opt->tcfile_out, "# timecode format v2\n" );
 
     /* Encode frames */
+    //循环进行编码
     for( ; !b_ctrl_c && (i_frame < param->i_frame_total || !param->i_frame_total); i_frame++ )
     {
+        //从输入源中获取1帧YUV数据，存于cli_pic
+        //cli_vid_filter_t可以认为是x264一种“扩展”后的输入源，可以在像素域对图像进行拉伸裁剪等工作。
+        //原本代表输入源的结构体是cli_input_t
         if( filter.get_frame( opt->hin, &cli_pic, i_frame + opt->i_seek ) )
             break;
+
+        //初始化x264_picture_t结构体pic
         x264_picture_init( &pic );
+
+        //cli_pic到pic
         convert_cli_to_lib_pic( &pic, &cli_pic );
 
         if( !param->b_vfr_input )
@@ -2047,6 +2079,8 @@ static int encode( x264_param_t *param, cli_opt_t *opt )
             parse_qpfile( opt, &pic, i_frame + opt->i_seek );
 
         prev_dts = last_dts;
+
+        //编码pic中存储的1帧YUV数据
         i_frame_size = encode_frame( h, opt->hout, &pic, &last_dts );
         if( i_frame_size < 0 )
         {
@@ -2061,6 +2095,7 @@ static int encode( x264_param_t *param, cli_opt_t *opt )
                 first_dts = prev_dts = last_dts;
         }
 
+        //释放处理完的YUV数据
         if( filter.release_frame( opt->hin, &cli_pic, i_frame + opt->i_seek ) )
             break;
 
@@ -2068,10 +2103,16 @@ static int encode( x264_param_t *param, cli_opt_t *opt )
         if( opt->b_progress && i_frame_output )
             i_previous = print_status( i_start, i_previous, i_frame_output, param->i_frame_total, i_file, param, 2 * last_dts - prev_dts - first_dts );
     }
+
     /* Flush delayed frames */
+    //输出编码器中剩余的帧
+    //x264_encoder_delayed_frames()返回剩余的帧的个数
     while( !b_ctrl_c && x264_encoder_delayed_frames( h ) )
     {
         prev_dts = last_dts;
+
+        //编码
+        //注意第3个参数为NULL
         i_frame_size = encode_frame( h, opt->hout, NULL, &last_dts );
         if( i_frame_size < 0 )
         {
@@ -2085,6 +2126,8 @@ static int encode( x264_param_t *param, cli_opt_t *opt )
             if( i_frame_output == 1 )
                 first_dts = prev_dts = last_dts;
         }
+
+        //输出一些统计信息
         if( opt->b_progress && i_frame_output )
             i_previous = print_status( i_start, i_previous, i_frame_output, param->i_frame_total, i_file, param, 2 * last_dts - prev_dts - first_dts );
     }
@@ -2100,6 +2143,7 @@ fail:
     else
         duration = (double)(2 * largest_pts - second_largest_pts) * param->i_timebase_num / param->i_timebase_den;
 
+    //计时结束
     i_end = x264_mdate();
     /* Erase progress indicator before printing encoding stats. */
     if( opt->b_progress )
@@ -2110,7 +2154,7 @@ fail:
 
     if( b_ctrl_c )
         fprintf( stderr, "aborted at input frame %d, output frame %d\n", opt->i_seek + i_frame, i_frame_output );
-
+    //关闭输出文件
     cli_output.close_file( opt->hout, largest_pts, second_largest_pts );
     opt->hout = NULL;
 
