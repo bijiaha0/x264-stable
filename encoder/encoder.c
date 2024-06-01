@@ -3198,6 +3198,8 @@ static void *slices_write( x264_t *h )
     /* init stats */
     memset( &h->stat.frame, 0, sizeof(h->stat.frame) );
     h->mb.b_reencode_mb = 0;
+
+    //循环每一个slice（一幅图像可以由多个Slice构成）
     while( h->sh.i_first_mb + SLICE_MBAFF*h->mb.i_mb_stride <= last_thread_mb )
     {
         h->sh.i_last_mb = last_thread_mb;
@@ -3232,8 +3234,13 @@ static void *slices_write( x264_t *h )
             }
         }
         h->sh.i_last_mb = X264_MIN( h->sh.i_last_mb, last_thread_mb );
+        //真正的编码——编码1个Slice
+        //x264_stack_align()应该是平台优化过程中内存对齐的工作
+        //实际上就是调用x264_slice_write()
+        //调用x264_slice_write(),进入核心编码函数块
         if( slice_write( h ) )
             goto fail;
+        //注意这里对i_first_mb进行了赋值
         h->sh.i_first_mb = h->sh.i_last_mb + 1;
         // if i_first_mb is not the last mb in a row then go to the next mb in MBAFF order
         if( SLICE_MBAFF && h->sh.i_first_mb % h->mb.i_mb_width )
