@@ -42,3 +42,34 @@ encode()编码YUV为H.264码流，主要流程为：
        b)调用print_status()输出一些统计信息。
 
 （7）调用x264_encoder_close()关闭H.264编码器。
+
+七、从源代码可以看出，x264_encoder_encode()的流程大致如下：
+（1）调用x264_frame_pop_unused获取一个空的fenc（x264_frame_t类型）用于存储一帧编码像素数据。
+
+（2）调用x264_frame_copy_picture()将外部结构体的pic_in（x264_picture_t类型）的数据拷贝给内部结构体的fenc（x264_frame_t类型）。
+
+（3）调用x264_lookahead_put_frame()将fenc放入Lookahead模块的队列中，等待确定帧类型。
+
+（4）调用x264_lookahead_get_frames()分析Lookahead模块中一个帧的帧类型。分析后的帧保存在frames.current[]中。
+
+（5）调用x264_frame_shift()从frames.current[]中取出分析帧类型之后的fenc。
+
+（6）调用x264_reference_update()更新参考帧队列frames.reference[]。
+
+（7）如果编码帧fenc是IDR帧，调用x264_reference_reset()清空参考帧队列frames.reference[]。
+
+（8）调用x264_reference_build_list()创建参考帧列表List0和List1。
+
+（9）根据选项做一些配置：
+
+          a)、如果b_aud不为0，输出AUD类型NALU
+
+          b)、在当前帧是关键帧的情况下，如果b_repeat_headers不为0，调用x264_sps_write()和x264_pps_write()输出SPS和PPS。
+
+          c)、输出一些特殊的SEI信息，用于适配各种解码器。
+
+（10）调用x264_slice_init()初始化Slice Header信息。
+
+（11）调用x264_slices_write()进行编码。该部分是libx264的核心，在后续文章中会详细分析。
+
+（12）调用x264_encoder_frame_end()做一些编码后的后续处理。
