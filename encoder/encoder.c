@@ -3337,6 +3337,7 @@ int x264_encoder_invalidate_reference( x264_t *h, int64_t pts )
 }
 
 /****************************************************************************
+ * 功能：编码一帧数据
  * x264_encoder_encode:
  *  XXX: i_poc   : is the poc of the current given picture
  *       i_frame : is the number of the frame being coded
@@ -3394,16 +3395,18 @@ int     x264_encoder_encode( x264_t *h,
         }
 
         /* 1: Copy the picture to a frame and move it to a buffer */
+        //步骤1:fenc存储了编码帧(获取一帧的空间fenc，用来存放待编码的帧)
         x264_frame_t *fenc = x264_frame_pop_unused( h, 0 );
         if( !fenc )
             return -1;
-
+        //外部像素数据传递到内部系统,pic_in（外部结构体x264_picture_t）到fenc（内部结构体x264_frame_t）
         if( x264_frame_copy_picture( h, fenc, pic_in ) < 0 )
             return -1;
 
+        //宽和高都确保是16的整数倍（宏块宽度的整数倍）
         if( h->param.i_width != 16 * h->mb.i_mb_width ||
             h->param.i_height != 16 * h->mb.i_mb_height )
-            x264_frame_expand_border_mod16( h, fenc );
+            x264_frame_expand_border_mod16( h, fenc );//扩展至16整数倍
 
         fenc->i_frame = h->frames.i_input++;
 
@@ -3448,10 +3451,13 @@ int     x264_encoder_encode( x264_t *h,
         if( pic_in->prop.quant_offsets_free )
             pic_in->prop.quant_offsets_free( pic_in->prop.quant_offsets );
 
+        //降低分辨率处理（原来的一半），线性内插
+        //注意这里并不是6抽头滤波器的半像素内插
         if( h->frames.b_have_lowres )
             x264_frame_init_lowres( h, fenc );
 
         /* 2: Place the frame into the queue for its slice type decision */
+        //步骤2:fenc放入lookahead.next.list[]队列，等待确定帧类型
         x264_lookahead_put_frame( h, fenc );
 
         if( h->frames.i_input <= h->frames.i_delay + 1 - h->i_thread_frames )
@@ -3472,6 +3478,7 @@ int     x264_encoder_encode( x264_t *h,
 
     h->i_frame++;
     /* 3: The picture is analyzed in the lookahead */
+    //步骤3:通过lookahead分析帧类型
     if( !h->frames.current[0] )
         x264_lookahead_get_frames( h );
 
@@ -3480,6 +3487,7 @@ int     x264_encoder_encode( x264_t *h,
 
     /* ------------------- Get frame to be encoded ------------------------- */
     /* 4: get picture to encode */
+    //步骤4:从frames.current[]队列取出1帧[0]用于编码
     h->fenc = x264_frame_shift( h->frames.current );
 
     /* If applicable, wait for previous frame reconstruction to finish */
@@ -3507,6 +3515,8 @@ int     x264_encoder_encode( x264_t *h,
     x264_ratecontrol_zone_init( h );
 
     // ok to call this before encoding any frames, since the initial values of fdec have b_kept_as_ref=0
+    //更新参考帧队列frames.reference[].若为B帧则不更新
+    //重建帧fdec移至参考帧列表，新建一个fdec
     if( reference_update( h ) )
         return -1;
     h->fdec->i_lines_completed = -1;
@@ -3543,8 +3553,12 @@ int     x264_encoder_encode( x264_t *h,
 
     /* ------------------- Setup frame context ----------------------------- */
     /* 5: Init data dependent of frame type */
+    //步骤5:确定帧类型
     if( h->fenc->i_type == X264_TYPE_IDR )
     {
+        //I与IDR区别
+        //注意IDR会导致参考帧列清空，而I不会
+        //I图像之后的图像可以引用I图像之间的图像做运动参考
         /* reset ref pictures */
         i_nal_type    = NAL_SLICE_IDR;
         i_nal_ref_idc = NAL_PRIORITY_HIGHEST;
