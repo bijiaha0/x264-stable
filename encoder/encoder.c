@@ -1513,6 +1513,7 @@ x264_t *x264_encoder_open( x264_param_t *param, void *api )
     CHECKED_MALLOCZERO( h, sizeof(x264_t) );
 
     /* Create a copy of param */
+    //将参数拷贝进来
     memcpy( &h->param, param, sizeof(x264_param_t) );
     h->param.opaque = NULL;
     h->param.param_free = NULL;
@@ -1548,7 +1549,7 @@ x264_t *x264_encoder_open( x264_param_t *param, void *api )
         x264_log( h, X264_LOG_ERROR, "unable to initialize threading\n" );
         goto fail;
     }
-
+    //检查输入参数（例如输入图像的宽高是否为正数）
     if( validate_parameters( h, 1 ) < 0 )
         goto fail;
 
@@ -1576,10 +1577,14 @@ x264_t *x264_encoder_open( x264_param_t *param, void *api )
 
     set_aspect_ratio( h, &h->param, 1 );
 
+    //根据输入参数生成H.264码流的SPS （Sequence Parameter Set，序列参数集）信息
     x264_sps_init( h->sps, h->param.i_sps_id, &h->param );
     x264_sps_init_scaling_list( h->sps, &h->param );
+
+    //根据输入参数生成H.264码流的PPS（Picture Parameter Set，图像参数集）信息
     x264_pps_init( h->pps, h->param.i_sps_id, &h->param, h->sps );
 
+    //检查级Level-通过宏块个数等等
     x264_validate_levels( h, 1 );
 
     h->chroma_qp_table = i_chroma_qp_table + 12 + h->pps->i_chroma_qp_index_offset;
@@ -1632,6 +1637,7 @@ x264_t *x264_encoder_open( x264_param_t *param, void *api )
     h->frames.i_poc_last_open_gop = -1;
 
     CHECKED_MALLOCZERO( h->cost_table, sizeof(*h->cost_table) );
+    //调用malloc()分配内存,然后调用memset()置零
     CHECKED_MALLOCZERO( h->frames.unused[0], (h->frames.i_delay + 3) * sizeof(x264_frame_t *) );
     /* Allocate room for max refs plus a few extra just in case. */
     CHECKED_MALLOCZERO( h->frames.unused[1], (h->i_thread_frames + X264_REF_MAX + 4) * sizeof(x264_frame_t *) );
@@ -1643,6 +1649,7 @@ x264_t *x264_encoder_open( x264_param_t *param, void *api )
     h->i_cpb_delay = h->i_coded_fields = h->i_disp_fields = 0;
     h->i_prev_duration = ((uint64_t)h->param.i_fps_den * h->sps->vui.i_time_scale) / ((uint64_t)h->param.i_fps_num * h->sps->vui.i_num_units_in_tick);
     h->i_disp_fields_last_frame = -1;
+    //RDO初始化
     x264_rdo_init();
 
     /* init CPU functions */
@@ -1652,27 +1659,42 @@ x264_t *x264_encoder_open( x264_param_t *param, void *api )
      * unnecessary thermal throttling and whatnot, so keep it disabled for now. */
     h->param.cpu &= ~X264_CPU_AVX512;
 #endif
+
+    //初始化包含汇编优化的函数
+    //帧内预测
+    //初始化Intra16x16帧内预测汇编函数(该函数的定义位于x264\common\predict.c)
     x264_predict_16x16_init( h->param.cpu, h->predict_16x16 );
     x264_predict_8x8c_init( h->param.cpu, h->predict_8x8c );
     x264_predict_8x16c_init( h->param.cpu, h->predict_8x16c );
     x264_predict_8x8_init( h->param.cpu, h->predict_8x8, &h->predict_8x8_filter );
+    //初始化Intra4x4帧内预测汇编函数
     x264_predict_4x4_init( h->param.cpu, h->predict_4x4 );
+
+    //初始化像素值计算相关的汇编函数（包括SAD、SATD、SSD等）(该函数的定义位于common\pixel.c)
     x264_pixel_init( h->param.cpu, &h->pixf );
+    //初始化DCT变换和DCT反变换相关的汇编函数(该函数的定义位于common\dct.c)
     x264_dct_init( h->param.cpu, &h->dctf );
+    //“之”字扫描
     x264_zigzag_init( h->param.cpu, &h->zigzagf_progressive, &h->zigzagf_interlaced );
     memcpy( &h->zigzagf, PARAM_INTERLACED ? &h->zigzagf_interlaced : &h->zigzagf_progressive, sizeof(h->zigzagf) );
+    //初始化运动补偿相关的汇编函数(该函数的定义位于common\mc.c)
     x264_mc_init( h->param.cpu, &h->mc, h->param.b_cpu_independent );
+    //初始化量化和反量化相关的汇编函数(该函数的定义位于common\quant.c)
     x264_quant_init( h, h->param.cpu, &h->quantf );
+    //初始化去块效应滤波器相关的汇编函数(该函数的定义位于common\deblock.c)
     x264_deblock_init( h->param.cpu, &h->loopf, PARAM_INTERLACED );
     x264_bitstream_init( h->param.cpu, &h->bsf );
+    //初始化CABAC或者是CAVLC
     if( h->param.b_cabac )
         x264_cabac_init( h );
     else
         x264_cavlc_init( h );
 
+    //决定了像素比较的时候用SAD还是SATD
     mbcmp_init( h );
     chroma_dsp_init( h );
 
+    //CPU属性
     p = buf + sprintf( buf, "using cpu capabilities:" );
     for( int i = 0; x264_cpu_names[i].flags; i++ )
     {
@@ -1799,6 +1821,7 @@ x264_t *x264_encoder_open( x264_param_t *param, void *api )
         h->param.b_opencl = 0;
 #endif
 
+    //初始化lookahead
     if( x264_lookahead_init( h, i_slicetype_length ) )
         goto fail;
 
@@ -1806,6 +1829,7 @@ x264_t *x264_encoder_open( x264_param_t *param, void *api )
         if( x264_macroblock_thread_allocate( h->thread[i], 0 ) < 0 )
             goto fail;
 
+    //创建码率控制
     if( x264_ratecontrol_new( h ) < 0 )
         goto fail;
 
