@@ -310,6 +310,7 @@ void x264_sps_init_scaling_list( x264_sps_t *sps, x264_param_t *param )
 void x264_sps_write( bs_t *s, x264_sps_t *sps )
 {
     bs_realign( s );
+    //型profile，8bit
     bs_write( s, 8, sps->i_profile_idc );
     bs_write1( s, sps->b_constraint_set0 );
     bs_write1( s, sps->b_constraint_set1 );
@@ -317,17 +318,27 @@ void x264_sps_write( bs_t *s, x264_sps_t *sps )
     bs_write1( s, sps->b_constraint_set3 );
 
     bs_write( s, 4, 0 );    /* reserved */
-
+    //级level，8bit
     bs_write( s, 8, sps->i_level_idc );
-
+    //本SPS的 id号
     bs_write_ue( s, sps->i_id );
 
     if( sps->i_profile_idc >= PROFILE_HIGH )
     {
+        //色度取样格式
+        //0代表单色
+        //1代表4:2:0
+        //2代表4:2:2
+        //3代表4:4:4
         bs_write_ue( s, sps->i_chroma_format_idc );
         if( sps->i_chroma_format_idc == CHROMA_444 )
             bs_write1( s, 0 ); // separate_colour_plane_flag
+
+        //亮度
+        //颜色位深=bit_depth_luma_minus8+8
         bs_write_ue( s, BIT_DEPTH-8 ); // bit_depth_luma_minus8
+
+        //色度与亮度一样
         bs_write_ue( s, BIT_DEPTH-8 ); // bit_depth_chroma_minus8
         bs_write1( s, sps->b_qpprime_y_zero_transform_bypass );
         /* Exactly match the AVC-Intra bitstream */
@@ -352,13 +363,32 @@ void x264_sps_write( bs_t *s, x264_sps_t *sps )
         }
     }
 
+    //log2_max_frame_num_minus4主要是为读取另一个句法元素frame_num服务的
+    //frame_num 是最重要的句法元素之一
+    //这个句法元素指明了frame_num的所能达到的最大值：
+    //MaxFrameNum = 2^( log2_max_frame_num_minus4 + 4 )
     bs_write_ue( s, sps->i_log2_max_frame_num - 4 );
+
+    //pic_order_cnt_type 指明了poc (picture order count) 的编码方法
+    //poc标识图像的播放顺序。
+    //由于H.264使用了B帧预测，使得图像的解码顺序并不一定等于播放顺序，但它们之间存在一定的映射关系
+    //poc 可以由frame-num 通过映射关系计算得来，也可以索性由编码器显式地传送。
+    //H.264 中一共定义了三种poc 的编码方法
     bs_write_ue( s, sps->i_poc_type );
     if( sps->i_poc_type == 0 )
         bs_write_ue( s, sps->i_log2_max_poc_lsb - 4 );
+
+    //num_ref_frames 指定参考帧队列可能达到的最大长度，解码器依照这个句法元素的值开辟存储区，这个存储区用于存放已解码的参考帧，
+    //H.264 规定最多可用16 个参考帧，因此最大值为16。
     bs_write_ue( s, sps->i_num_ref_frames );
     bs_write1( s, sps->b_gaps_in_frame_num_value_allowed );
+
+    //pic_width_in_mbs_minus1加1后为图像宽（以宏块为单位）：
+    //           PicWidthInMbs = pic_width_in_mbs_minus1 + 1
+    //以像素为单位图像宽度（亮度）：width=PicWidthInMbs*16
     bs_write_ue( s, sps->i_mb_width - 1 );
+
+    //pic_height_in_map_units_minus1加1后指明图像高度（以宏块为单位）
     bs_write_ue( s, (sps->i_mb_height >> !sps->b_frame_mbs_only) - 1);
     bs_write1( s, sps->b_frame_mbs_only );
     if( !sps->b_frame_mbs_only )
@@ -477,6 +507,8 @@ void x264_sps_write( bs_t *s, x264_sps_t *sps )
         }
     }
 
+    //RBSP拖尾
+    //无论比特流当前位置是否字节对齐 ， 都向其中写入一个比特1及若干个（0~7个）比特0 ， 使其字节对齐
     bs_rbsp_trailing( s );
     bs_flush( s );
 }

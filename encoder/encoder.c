@@ -2114,6 +2114,8 @@ static int encoder_encapsulate_nals( x264_t *h, int start )
     return nal_buffer - (h0->nal_buffer + previous_nal_size);
 }
 
+
+//功能：x264_encoder_headers()是libx264的一个API函数，用于输出SPS/PPS/SEI这些H.264码流的头信息
 /****************************************************************************
  * x264_encoder_headers:
  ****************************************************************************/
