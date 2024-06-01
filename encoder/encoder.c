@@ -4235,6 +4235,7 @@ static void print_intra( int64_t *i_mb_count, double i_count, int b_print_pcm, c
 
 /****************************************************************************
  * x264_encoder_close:
+  * 功能：关闭编码器，同时输出一些统计信息。
  ****************************************************************************/
 void    x264_encoder_close  ( x264_t *h )
 {
@@ -4275,6 +4276,11 @@ void    x264_encoder_close  ( x264_t *h )
     h->i_frame++;
 
     /* Slices used and PSNR */
+    /* 示例
+     * x264 [info]: frame I:2     Avg QP:20.51  size: 20184  PSNR Mean Y:45.32 U:47.54 V:47.62 Avg:45.94 Global:45.52
+     * x264 [info]: frame P:33    Avg QP:23.08  size:  3230  PSNR Mean Y:43.23 U:47.06 V:46.87 Avg:44.15 Global:44.00
+     * x264 [info]: frame B:65    Avg QP:27.87  size:   352  PSNR Mean Y:42.76 U:47.21 V:47.05 Avg:43.79 Global:43.65
+     */
     for( int i = 0; i < 3; i++ )
     {
         static const uint8_t slice_order[] = { SLICE_TYPE_I, SLICE_TYPE_P, SLICE_TYPE_B };
@@ -4286,6 +4292,8 @@ void    x264_encoder_close  ( x264_t *h )
             double dur =  h->stat.f_frame_duration[i_slice];
             if( h->param.analyse.b_psnr )
             {
+                //输出统计信息-包含PSNR
+                //注意PSNR都是通过SSD换算过来的，换算方法就是调用x264_psnr()方法
                 x264_log( h, X264_LOG_INFO,
                           "frame %c:%-5d Avg QP:%5.2f  size:%6.0f  PSNR Mean Y:%5.2f U:%5.2f V:%5.2f Avg:%5.2f Global:%5.2f\n",
                           slice_type_to_char[i_slice],
@@ -4298,6 +4306,7 @@ void    x264_encoder_close  ( x264_t *h )
             }
             else
             {
+                //输出统计信息-不包含PSNR
                 x264_log( h, X264_LOG_INFO,
                           "frame %c:%-5d Avg QP:%5.2f  size:%6.0f\n",
                           slice_type_to_char[i_slice],
@@ -4307,8 +4316,14 @@ void    x264_encoder_close  ( x264_t *h )
             }
         }
     }
+
+    /* 示例
+     * x264 [info]: consecutive B-frames:  3.0% 10.0% 63.0% 24.0%
+     *
+     */
     if( h->param.i_bframe && h->stat.i_frame_count[SLICE_TYPE_B] )
     {
+        //B帧相关信息
         char *p = buf;
         int den = 0;
         // weight by number of frames (including the I/P-frames) that are in a sequence of N B-frames
@@ -4327,10 +4342,18 @@ void    x264_encoder_close  ( x264_t *h )
         }
 
     /* MB types used */
+    /* 示例
+     * x264 [info]: mb I  I16..4: 15.3% 37.5% 47.3%
+     * x264 [info]: mb P  I16..4:  0.6%  0.4%  0.2%  P16..4: 34.6% 21.2% 12.7%  0.0%  0.0%    skip:30.4%
+     * x264 [info]: mb B  I16..4:  0.0%  0.0%  0.0%  B16..8: 21.2%  4.1%  0.7%  direct: 0.8%  skip:73.1%  L0:28.7% L1:53.0% BI:18.3%
+     */
     if( h->stat.i_frame_count[SLICE_TYPE_I] > 0 )
     {
         int64_t *i_mb_count = h->stat.i_mb_count[SLICE_TYPE_I];
         double i_count = (double)h->stat.i_frame_count[SLICE_TYPE_I] * h->mb.i_mb_count / 100.0;
+
+        //Intra宏块信息-存于buf
+        //从左到右3个信息，依次为I16x16,I8x8,I4x4
         print_intra( i_mb_count, i_count, b_print_pcm, buf );
         x264_log( h, X264_LOG_INFO, "mb I  %s\n", buf );
     }
@@ -4339,7 +4362,12 @@ void    x264_encoder_close  ( x264_t *h )
         int64_t *i_mb_count = h->stat.i_mb_count[SLICE_TYPE_P];
         double i_count = (double)h->stat.i_frame_count[SLICE_TYPE_P] * h->mb.i_mb_count / 100.0;
         int64_t *i_mb_size = i_mb_count_size[SLICE_TYPE_P];
+        //Intra宏块信息-存于buf
         print_intra( i_mb_count, i_count, b_print_pcm, buf );
+
+        //Intra宏块信息-放在最前面
+        //后面添加P宏块信息
+        //从左到右6个信息，依次为P16x16, P16x8+P8x16, P8x8, P8x4+P4x8, P4x4, PSKIP
         x264_log( h, X264_LOG_INFO,
                   "mb P  %s  P16..4: %4.1f%% %4.1f%% %4.1f%% %4.1f%% %4.1f%%    skip:%4.1f%%\n",
                   buf,
@@ -4371,6 +4399,15 @@ void    x264_encoder_close  ( x264_t *h )
         list_count[2] += h->stat.i_mb_partition[SLICE_TYPE_B][D_BI_8x8];
         i_mb_count[B_DIRECT] += (h->stat.i_mb_partition[SLICE_TYPE_B][D_DIRECT_8x8]+2)/4;
         i_mb_list_count = (list_count[0] + list_count[1] + list_count[2]) / 100.0;
+
+        //Intra宏块信息-放在最前面
+        //后面添加B宏块信息
+        //从左到右5个信息，依次为B16x16, B16x8+B8x16, B8x8, BDIRECT, BSKIP
+        //
+        //SKIP和DIRECT区别
+        //P_SKIP的CBP为0,无像素残差，无运动矢量残
+        //B_SKIP宏块的模式为B_DIRECT且CBP为0,无像素残差，无运动矢量残
+        //B_DIRECT的CBP不为0,有像素残差，无运动矢量残
         sprintf( buf + strlen(buf), "  B16..8: %4.1f%% %4.1f%% %4.1f%%  direct:%4.1f%%  skip:%4.1f%%",
                  i_mb_size[PIXEL_16x16] / (i_count*4),
                  (i_mb_size[PIXEL_16x8] + i_mb_size[PIXEL_8x16]) / (i_count*4),
@@ -4385,6 +4422,7 @@ void    x264_encoder_close  ( x264_t *h )
         x264_log( h, X264_LOG_INFO, "mb B  %s\n", buf );
     }
 
+    //汇总码率控制信息
     x264_ratecontrol_summary( h );
 
     if( h->stat.i_frame_count[SLICE_TYPE_I] + h->stat.i_frame_count[SLICE_TYPE_P] + h->stat.i_frame_count[SLICE_TYPE_B] > 0 )
@@ -4419,6 +4457,7 @@ void    x264_encoder_close  ( x264_t *h )
                       h->stat.i_mb_field[0] * 100.0 / i_all_intra, buf );
         }
 
+        //8x8DCT信息
         if( h->pps->b_transform_8x8_mode )
         {
             buf[0] = 0;
@@ -4445,6 +4484,11 @@ void    x264_encoder_close  ( x264_t *h )
                          h->stat.i_mb_cbp[1] * 100.0 / ((i_mb_count - i_all_intra)*4),
                          h->stat.i_mb_cbp[3] * 100.0 / ((i_mb_count - i_all_intra)*csize),
                          h->stat.i_mb_cbp[5] * 100.0 / ((i_mb_count - i_all_intra)*csize) );
+
+            /*
+             * 示例
+             * x264 [info]: coded y,uvDC,uvAC intra: 74.1% 83.3% 58.9% inter: 10.4% 6.6% 0.4%
+             */
             x264_log( h, X264_LOG_INFO, "coded y,%s,%s intra: %.1f%% %.1f%% %.1f%%%s\n",
                       CHROMA444?"u":"uvDC", CHROMA444?"v":"uvAC",
                       h->stat.i_mb_cbp[0] * 100.0 / (i_all_intra*4),
@@ -4459,6 +4503,19 @@ void    x264_encoder_close  ( x264_t *h )
                       h->stat.i_mb_cbp[0] * 100.0 / (i_all_intra*4), buf );
         }
 
+        /*
+         * 帧内预测信息
+         * 从上到下分别为I16x16,I8x8,I4x4
+         * 从左到右顺序为Vertical, Horizontal, DC, Plane ....
+         *
+         * 示例
+         *
+         * x264 [info]: i16 v,h,dc,p: 21% 25%  7% 48%
+         * x264 [info]: i8 v,h,dc,ddl,ddr,vr,hd,vl,hu: 25% 23% 13%  6%  5%  5%  6%  8% 10%
+         * x264 [info]: i4 v,h,dc,ddl,ddr,vr,hd,vl,hu: 22% 20%  9%  7%  7%  8%  8%  7% 12%
+         * x264 [info]: i8c dc,h,v,p: 43% 20% 27% 10%
+         *
+         */
         int64_t fixed_pred_modes[4][9] = {{0}};
         int64_t sum_pred_modes[4] = {0};
         for( int i = 0; i <= I_PRED_16x16_DC_128; i++ )
@@ -4512,6 +4569,17 @@ void    x264_encoder_close  ( x264_t *h )
                       h->stat.i_wpred[0] * 100.0 / h->stat.i_frame_count[SLICE_TYPE_P], buf );
         }
 
+        /*
+         * 参考帧信息
+         * 从左到右依次为不同序号的参考帧
+         *
+         * 示例
+         *
+         * x264 [info]: ref P L0: 62.5% 19.7% 13.8%  4.0%
+         * x264 [info]: ref B L0: 88.8%  9.4%  1.9%
+         * x264 [info]: ref B L1: 92.6%  7.4%
+         *
+         */
         for( int i_list = 0; i_list < 2; i_list++ )
             for( int i_slice = 0; i_slice < 2; i_slice++ )
             {
@@ -4536,6 +4604,14 @@ void    x264_encoder_close  ( x264_t *h )
             float ssim = SUM3( h->stat.f_ssim_mean_y ) / duration;
             x264_log( h, X264_LOG_INFO, "SSIM Mean Y:%.7f (%6.3fdb)\n", ssim, calc_ssim_db( ssim ) );
         }
+
+
+        /*
+         * 示例
+         *
+         * x264 [info]: PSNR Mean Y:42.967 U:47.163 V:47.000 Avg:43.950 Global:43.796 kb/s:339.67
+         *
+         */
         if( h->param.analyse.b_psnr )
         {
             x264_log( h, X264_LOG_INFO,
