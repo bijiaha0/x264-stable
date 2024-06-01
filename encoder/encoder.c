@@ -3184,7 +3184,11 @@ static void thread_sync_stat( x264_t *dst, x264_t *src )
     if( dst != src )
         memcpy( &dst->stat, &src->stat, offsetof(x264_t, stat.frame) - offsetof(x264_t, stat) );
 }
-
+/************====== x264_slices_write()函数 ======************/
+/*
+功能：编码数据（最关键的步骤）,其中调用了x264_slice_write()完成了编码的工作
+（注意“x264_slices_write()”和“x264_slice_write()”名字差了一个“s”）。
+*/
 static void *slices_write( x264_t *h )
 {
     int i_slice_num = 0;
