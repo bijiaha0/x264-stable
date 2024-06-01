@@ -2778,9 +2778,13 @@ static ALWAYS_INLINE void bitstream_restore( x264_t *h, x264_bs_bak_t *bak, int 
     }
 }
 
+/*
+功能：编码一个Slice
+*/
 static intptr_t slice_write( x264_t *h )
 {
     int i_skip;
+    //宏块的序号，以及序号对应的x，y坐标
     int mb_xy, i_mb_x, i_mb_y;
     /* NALUs other than the first use a 3-byte startcode.
      * Add one extra byte for the rbsp, and one more for the final CABAC putbyte.
@@ -2805,10 +2809,15 @@ static intptr_t slice_write( x264_t *h )
     bs_realign( &h->out.bs );
 
     /* Slice */
+    //开始输出一个NAL,后面对应着x264_nal_end()
     nal_start( h, h->i_nal_type, h->i_nal_ref_idc );
     h->out.nal[h->out.i_nal].i_first_mb = h->sh.i_first_mb;
 
     /* Slice header */
+    //存储宏块像素的缓存fdec_buf和fenc_buf的初始化
+    //宏块编码缓存p_fenc[0]，p_fenc[1]，p_fenc[2]
+    //宏块重建缓存p_fdec[0]，p_fdec[1]，p_fdec[2]
+    //[0]存Y，[1]存U，[2]存V
     x264_macroblock_thread_init( h );
 
     /* Set the QP equal to the first QP in the slice for more accurate CABAC initialization. */
@@ -2817,7 +2826,9 @@ static intptr_t slice_write( x264_t *h )
     h->sh.i_qp = SPEC_QP( h->sh.i_qp );
     h->sh.i_qp_delta = h->sh.i_qp - h->pps->i_pic_init_qp;
 
+    //输出 Slice Header
     slice_header_write( &h->out.bs, &h->sh, h->i_nal_ref_idc );
+    //如果使用CABAC，需要初始化
     if( h->param.b_cabac )
     {
         /* alignment needed */
@@ -2834,7 +2845,9 @@ static intptr_t slice_write( x264_t *h )
     h->mb.i_last_dqp = 0;
     h->mb.field_decoding_flag = 0;
 
+    //宏块位置-纵坐标（初始值）
     i_mb_y = h->sh.i_first_mb / h->mb.i_mb_width;
+    //宏块位置-横坐标（初始值）
     i_mb_x = h->sh.i_first_mb % h->mb.i_mb_width;
     i_skip = 0;
 

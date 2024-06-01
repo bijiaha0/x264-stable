@@ -73,3 +73,32 @@ encode()编码YUV为H.264码流，主要流程为：
 （11）调用x264_slices_write()进行编码。该部分是libx264的核心，在后续文章中会详细分析。
 
 （12）调用x264_encoder_frame_end()做一些编码后的后续处理。
+
+
+九、根据源代码简单梳理了x264_slice_write()的流程，如下所示：
+
+（1）、调用x264_nal_start()开始输出一个NALU。
+
+（2）、x264_macroblock_thread_init()：初始化宏块重建像素缓存fdec_buf[]和编码像素缓存fenc_buf[]。
+
+（3）、调用x264_slice_header_write()输出 Slice Header。
+
+（4）、进入一个循环，该循环每执行一遍编码一个宏块：
+
+               a)、 每处理一行宏块，调用一次x264_fdec_filter_row()执行滤波模块。
+
+               b)、 调用x264_macroblock_cache_load_progressive()将要编码的宏块的周围的宏块的信息读进来。
+
+               c) 、调用x264_macroblock_analyse()执行分析模块。
+
+               d) 、调用x264_macroblock_encode()执行宏块编码模块。
+
+               e) 、调用x264_macroblock_write_cabac()/x264_macroblock_write_cavlc()执行熵编码模块。
+
+               f) 、调用x264_macroblock_cache_save()保存当前宏块的信息。
+
+              g) 、调用x264_ratecontrol_mb()执行码率控制。
+
+              h) 、准备处理下一个宏块。
+
+（5）、调用x264_nal_end()结束输出一个NALU。
