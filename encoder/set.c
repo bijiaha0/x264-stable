@@ -548,18 +548,25 @@ void x264_pps_init( x264_pps_t *pps, int i_id, x264_param_t *param, x264_sps_t *
 void x264_pps_write( bs_t *s, x264_sps_t *sps, x264_pps_t *pps )
 {
     bs_realign( s );
+    //PPS的ID
     bs_write_ue( s, pps->i_id );
+    //该PPS引用的SPS的ID
     bs_write_ue( s, pps->i_sps_id );
 
+    //entropy_coding_mode_flag
+    //0表示熵编码使用CAVLC，1表示熵编码使用CABAC
     bs_write1( s, pps->b_cabac );
     bs_write1( s, pps->b_pic_order );
     bs_write_ue( s, pps->i_num_slice_groups - 1 );
 
     bs_write_ue( s, pps->i_num_ref_idx_l0_default_active - 1 );
     bs_write_ue( s, pps->i_num_ref_idx_l1_default_active - 1 );
+    //P Slice 是否使用加权预测？
     bs_write1( s, pps->b_weighted_pred );
+    //B Slice 是否使用加权预测？
     bs_write( s, 2, pps->b_weighted_bipred );
 
+    //pic_init_qp_minus26加26后用以指明亮度分量的QP的初始值。
     bs_write_se( s, pps->i_pic_init_qp - 26 - QP_BD_OFFSET );
     bs_write_se( s, pps->i_pic_init_qs - 26 - QP_BD_OFFSET );
     bs_write_se( s, pps->i_chroma_qp_index_offset );
@@ -610,6 +617,8 @@ void x264_pps_write( bs_t *s, x264_sps_t *sps, x264_pps_t *pps )
         bs_write_se( s, pps->i_chroma_qp_index_offset );
     }
 
+    //RBSP拖尾
+    //无论比特流当前位置是否字节对齐 ， 都向其中写入一个比特1及若干个（0~7个）比特0 ， 使其字节对齐
     bs_rbsp_trailing( s );
     bs_flush( s );
 }
