@@ -2125,21 +2125,24 @@ int x264_encoder_headers( x264_t *h, x264_nal_t **pp_nal, int *pi_nal )
     bs_init( &h->out.bs, h->out.p_bitstream, h->out.i_bitstream );
 
     /* Write SEI, SPS and PPS. */
-
+    /*在输出每个NALU之前，需要调用x264_nal_start()，在输出NALU之后，需要调用x264_nal_end()*/
     /* generate sequence parameters */
     nal_start( h, NAL_SPS, NAL_PRIORITY_HIGHEST );
+    //输出SPS
     x264_sps_write( &h->out.bs, h->sps );
     if( nal_end( h ) )
         return -1;
 
     /* generate picture parameters */
     nal_start( h, NAL_PPS, NAL_PRIORITY_HIGHEST );
+    //输出PPS
     x264_pps_write( &h->out.bs, h->sps, h->pps );
     if( nal_end( h ) )
         return -1;
 
     /* identify ourselves */
     nal_start( h, NAL_SEI, NAL_PRIORITY_DISPOSABLE );
+    //输出SEI（其中包含了配置信息）
     if( x264_sei_version_write( h, &h->out.bs ) )
         return -1;
     if( nal_end( h ) )

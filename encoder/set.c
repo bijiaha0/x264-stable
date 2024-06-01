@@ -103,11 +103,14 @@ void x264_sps_init( x264_sps_t *sps, int i_id, x264_param_t *param )
     int csp = param->i_csp & X264_CSP_MASK;
 
     sps->i_id = i_id;
+    //以宏块为单位的宽度
     sps->i_mb_width = ( param->i_width + 15 ) / 16;
+    //以宏块为单位的高度
     sps->i_mb_height= ( param->i_height + 15 ) / 16;
     sps->b_frame_mbs_only = !(param->b_interlaced || param->b_fake_interlaced);
     if( !sps->b_frame_mbs_only )
         sps->i_mb_height = ( sps->i_mb_height + 1 ) & ~1;
+    //色度取样格式
     sps->i_chroma_format_idc = csp >= X264_CSP_I444 ? CHROMA_444 :
                                csp >= X264_CSP_I422 ? CHROMA_422 :
                                csp >= X264_CSP_I420 ? CHROMA_420 : CHROMA_400;
@@ -133,7 +136,7 @@ void x264_sps_init( x264_sps_t *sps, int i_id, x264_param_t *param )
     /* Never set constraint_set2, it is not necessary and not used in real world. */
     sps->b_constraint_set2  = 0;
     sps->b_constraint_set3  = 0;
-
+    //级level
     sps->i_level_idc = param->i_level_idc;
     if( param->i_level_idc == 9 && ( sps->i_profile_idc == PROFILE_BASELINE || sps->i_profile_idc == PROFILE_MAIN ) )
     {
@@ -147,6 +150,7 @@ void x264_sps_init( x264_sps_t *sps, int i_id, x264_param_t *param )
     sps->vui.i_num_reorder_frames = param->i_bframe_pyramid ? 2 : param->i_bframe ? 1 : 0;
     /* extra slot with pyramid so that we don't have to override the
      * order of forgetting old pictures */
+    //参考帧数量
     sps->vui.i_max_dec_frame_buffering =
     sps->i_num_ref_frames = X264_MIN(X264_REF_MAX, X264_MAX4(param->i_frame_reference, 1 + sps->vui.i_num_reorder_frames,
                             param->i_bframe_pyramid ? 4 : 1, param->i_dpb_size));
@@ -170,6 +174,7 @@ void x264_sps_init( x264_sps_t *sps, int i_id, x264_param_t *param )
     while( (1 << sps->i_log2_max_frame_num) <= max_frame_num )
         sps->i_log2_max_frame_num++;
 
+    //POC类型
     sps->i_poc_type = param->i_bframe || param->b_interlaced || param->i_avcintra_class ? 0 : 2;
     if( sps->i_poc_type == 0 )
     {
@@ -479,18 +484,24 @@ void x264_sps_write( bs_t *s, x264_sps_t *sps )
 void x264_pps_init( x264_pps_t *pps, int i_id, x264_param_t *param, x264_sps_t *sps )
 {
     pps->i_id = i_id;
+    //所属的SPS
     pps->i_sps_id = sps->i_id;
+    //是否使用CABAC
     pps->b_cabac = param->b_cabac;
 
     pps->b_pic_order = !param->i_avcintra_class && param->b_interlaced;
     pps->i_num_slice_groups = 1;
 
+    //目前参考帧队列的长度
+    //注意是这个队列中当前实际的、已存在的参考帧数目，这从它的名字“active”中也可以看出来。
     pps->i_num_ref_idx_l0_default_active = param->i_frame_reference;
     pps->i_num_ref_idx_l1_default_active = 1;
 
+    //加权预测
     pps->b_weighted_pred = param->analyse.i_weighted_pred > 0;
     pps->b_weighted_bipred = param->analyse.b_weighted_bipred ? 2 : 0;
 
+    //量化参数QP的初始值
     pps->i_pic_init_qp = param->rc.i_rc_method == X264_RC_ABR || param->b_stitchable ? 26 + QP_BD_OFFSET : SPEC_QP( param->rc.i_qp_constant );
     pps->i_pic_init_qs = 26 + QP_BD_OFFSET;
 
