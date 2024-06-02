@@ -102,3 +102,31 @@ encode()编码YUV为H.264码流，主要流程为：
               h) 、准备处理下一个宏块。
 
 （5）、调用x264_nal_end()结束输出一个NALU。
+
+
+十一、尽管x264_macroblock_analyse()的源代码比较长，但是它的逻辑比较清晰，如下所示：
+
+（1）、如果当前是I Slice，调用x264_mb_analyse_intra()进行Intra宏块的帧内预测模式分析。
+
+
+（2）、如果当前是P Slice，则进行下面流程的分析：
+
+    a)、调用x264_macroblock_probe_pskip()分析是否为Skip宏块，如果是的话则不再进行下面分析。
+
+    b)、调用x264_mb_analyse_inter_p16x16()分析P16x16帧间预测的代价。
+
+    c)、调用x264_mb_analyse_inter_p8x8()分析P8x8帧间预测的代价。
+
+    d)、如果P8x8代价值小于P16x16，则依次对4个8x8的子宏块分割进行判断：
+
+        i、调用x264_mb_analyse_inter_p4x4()分析P4x4帧间预测的代价。
+
+        ii、如果P4x4代价值小于P8x8，则调用 x264_mb_analyse_inter_p8x4()和x264_mb_analyse_inter_p4x8()分析P8x4和P4x8帧间预测的代价。
+
+    e)、如果P8x8代价值小于P16x16，调用x264_mb_analyse_inter_p16x8()和x264_mb_analyse_inter_p8x16()分析P16x8和P8x16帧间预测的代价。
+
+    f)、此外还要调用x264_mb_analyse_intra()，检查当前宏块作为Intra宏块编码的代价是否小于作为P宏块编码的代价（P Slice中也允许有Intra宏块）。
+
+
+
+（3）、如果当前是B Slice，则进行和P Slice类似的处理。

@@ -2920,6 +2920,7 @@ void x264_macroblock_analyse( x264_t *h )
     x264_mb_analysis_t analysis;
     int i_cost = COST_MAX;
 
+    //通过码率控制方法，获取本宏块QP
     h->mb.i_qp = x264_ratecontrol_mb_qp( h );
     /* If the QP of this MB is within 1 of the previous MB, code the same QP as the previous MB,
      * to lower the bit cost of the qp_delta.  Don't do this if QPRD is enabled. */
@@ -2928,28 +2929,54 @@ void x264_macroblock_analyse( x264_t *h )
 
     if( h->param.analyse.b_mb_info )
         h->fdec->effective_qp[h->mb.i_mb_xy] = h->mb.i_qp; /* Store the real analysis QP. */
+    //Analysis模块初始化
     mb_analyse_init( h, &analysis, h->mb.i_qp );
 
     /*--------------------------- Do the analysis ---------------------------*/
+    //I帧：只使用帧内预测，分别计算亮度16x16（4种）和4x4（9种）所有模式的代价值，选出代价最小的模式
     if( h->sh.i_type == SLICE_TYPE_I )
     {
+
+        //I slice
+        //通过一系列帧内预测模式（16x16的4种,4x4的9种）代价的计算得出代价最小的最优模式
 intra_analysis:
         if( analysis.i_mbrd )
             mb_init_fenc_cache( h, analysis.i_mbrd >= 2 );
-        mb_analyse_intra( h, &analysis, COST_MAX );
+
+        //帧内预测分析
+        //从16×16的SAD,4个8×8的SAD和，16个4×4SAD中选出最优方式
+        mb_analyse_intra( h, &analysis, COST_MAX );//Intra宏块帧内预测模式分析
+
         if( analysis.i_mbrd )
             intra_rd( h, &analysis, COST_MAX );
 
+        //分析结果(开销)都存储在analysis结构体中
         i_cost = analysis.i_satd_i16x16;
         h->mb.i_type = I_16x16;
+
+        //如果I4x4或者I8x8开销更小的话就拷贝
+        //copy if little
         COPY2_IF_LT( i_cost, analysis.i_satd_i4x4, h->mb.i_type, I_4x4 );
         COPY2_IF_LT( i_cost, analysis.i_satd_i8x8, h->mb.i_type, I_8x8 );
+
+        //画面极其特殊的时候，才有可能用到PCM
         if( analysis.i_satd_pcm < i_cost )
             h->mb.i_type = I_PCM;
 
         else if( analysis.i_mbrd >= 2 )
             intra_rd_refine( h, &analysis );
     }
+
+
+    /*******************************************************/
+    /*
+    P帧：计算帧内模式和帧间模式（ P Slice允许有Intra宏块和P宏块；同理B帧也支持Intra宏块）。
+    对P帧的每一种分割进行帧间预测，得到最佳的运动矢量及最佳匹配块。
+    帧间预测过程：选出最佳矢量——>找到最佳的整像素点——>找到最佳的二分之一像素点——>找到最佳的1/4像素点
+    然后取代价最小的为最佳MV和分割方式
+    最后从帧内模式和帧间模式中选择代价比较小的方式（有可能没有找到很好的匹配块，这时候就直接使用帧内预测而不是帧间预测）。
+    */
+    /*******************************************************/
     else if( h->sh.i_type == SLICE_TYPE_P )
     {
         int b_skip = 0;
@@ -3035,7 +3062,7 @@ skip_analysis:
 
             mb_analyse_load_costs( h, &analysis );
 
-            mb_analyse_inter_p16x16( h, &analysis );
+            mb_analyse_inter_p16x16( h, &analysis );//16x16 帧间预测宏块分析--P
 
             if( h->mb.i_type == P_SKIP )
             {
@@ -3049,7 +3076,7 @@ skip_analysis:
                 if( h->param.analyse.b_mixed_references )
                     mb_analyse_inter_p8x8_mixed_ref( h, &analysis );
                 else
-                    mb_analyse_inter_p8x8( h, &analysis );
+                    mb_analyse_inter_p8x8( h, &analysis );//8x8帧间预测宏块分析--P
             }
 
             /* Select best inter mode */
@@ -3057,6 +3084,9 @@ skip_analysis:
             i_partition = D_16x16;
             i_cost = analysis.l0.me16x16.cost;
 
+            //如果8x8的代价值小于16x16
+            //则进行8x8子块分割的处理
+            //处理的数据源自于l0?
             if( ( flags & X264_ANALYSE_PSUB16x16 ) && (!analysis.b_early_terminate ||
                 analysis.l0.i_cost8x8 < analysis.l0.me16x16.cost) )
             {
@@ -3067,22 +3097,25 @@ skip_analysis:
                 /* Do sub 8x8 */
                 if( flags & X264_ANALYSE_PSUB8x8 )
                 {
+                    //8x8块的子块的分析
                     for( int i = 0; i < 4; i++ )
                     {
+                        //4x4帧间预测宏块分析--P
                         mb_analyse_inter_p4x4( h, &analysis, i );
                         int i_thresh8x4 = analysis.l0.me4x4[i][1].cost_mv + analysis.l0.me4x4[i][2].cost_mv;
+                        //如果4x4小于8x8,则再分析8x4，4x8的代价
                         if( !analysis.b_early_terminate || analysis.l0.i_cost4x4[i] < analysis.l0.me8x8[i].cost + i_thresh8x4 )
                         {
                             int i_cost8x8 = analysis.l0.i_cost4x4[i];
                             h->mb.i_sub_partition[i] = D_L0_4x4;
 
-                            mb_analyse_inter_p8x4( h, &analysis, i );
+                            mb_analyse_inter_p8x4( h, &analysis, i );///8x4帧间预测宏块分析--P
                             COPY2_IF_LT( i_cost8x8, analysis.l0.i_cost8x4[i],
-                                         h->mb.i_sub_partition[i], D_L0_8x4 );
+                                         h->mb.i_sub_partition[i], D_L0_8x4 );//如果8x4小于8x8
 
-                            mb_analyse_inter_p4x8( h, &analysis, i );
+                            mb_analyse_inter_p4x8( h, &analysis, i );///4x8帧间预测宏块分析--P
                             COPY2_IF_LT( i_cost8x8, analysis.l0.i_cost4x8[i],
-                                         h->mb.i_sub_partition[i], D_L0_4x8 );
+                                         h->mb.i_sub_partition[i], D_L0_4x8 );//如果4x8小于8x8
 
                             i_cost += i_cost8x8 - analysis.l0.me8x8[i].cost;
                         }
@@ -3094,6 +3127,8 @@ skip_analysis:
 
             /* Now do 16x8/8x16 */
             int i_thresh16x8 = analysis.l0.me8x8[1].cost_mv + analysis.l0.me8x8[2].cost_mv;
+
+            //前提要求8x8的代价值小于16x16
             if( ( flags & X264_ANALYSE_PSUB16x16 ) && (!analysis.b_early_terminate ||
                 analysis.l0.i_cost8x8 < analysis.l0.me16x16.cost + i_thresh16x8) )
             {
@@ -3101,20 +3136,21 @@ skip_analysis:
                                       + analysis.l0.me8x8[3].cost_mv + analysis.l0.me8x8[3].i_ref_cost + 1) >> 1;
                 analysis.i_cost_est16x8[1] = analysis.i_satd8x8[0][2] + analysis.i_satd8x8[0][3] + i_avg_mv_ref_cost;
 
-                mb_analyse_inter_p16x8( h, &analysis, i_cost );
+                mb_analyse_inter_p16x8( h, &analysis, i_cost );//16x8帧间预测宏块分析--P
                 COPY3_IF_LT( i_cost, analysis.l0.i_cost16x8, i_type, P_L0, i_partition, D_16x8 );
 
                 i_avg_mv_ref_cost = (analysis.l0.me8x8[1].cost_mv + analysis.l0.me8x8[1].i_ref_cost
                                   + analysis.l0.me8x8[3].cost_mv + analysis.l0.me8x8[3].i_ref_cost + 1) >> 1;
                 analysis.i_cost_est8x16[1] = analysis.i_satd8x8[0][1] + analysis.i_satd8x8[0][3] + i_avg_mv_ref_cost;
 
-                mb_analyse_inter_p8x16( h, &analysis, i_cost );
+                mb_analyse_inter_p8x16( h, &analysis, i_cost );//8x16帧间预测宏块分析--P
                 COPY3_IF_LT( i_cost, analysis.l0.i_cost8x16, i_type, P_L0, i_partition, D_8x16 );
             }
 
             h->mb.i_partition = i_partition;
 
             /* refine qpel */
+            //亚像素精度搜索
             //FIXME mb_type costs?
             if( analysis.i_mbrd || !h->mb.i_subpel_refine )
             {
@@ -3122,7 +3158,7 @@ skip_analysis:
             }
             else if( i_partition == D_16x16 )
             {
-                x264_me_refine_qpel( h, &analysis.l0.me16x16 );
+                x264_me_refine_qpel( h, &analysis.l0.me16x16 );//亚像素精度搜索
                 i_cost = analysis.l0.me16x16.cost;
             }
             else if( i_partition == D_16x8 )
@@ -3195,7 +3231,7 @@ skip_analysis:
                 analysis.i_satd_i4x4   += analysis.i_satd_chroma;
             }
             else
-                mb_analyse_intra( h, &analysis, i_cost );
+                mb_analyse_intra( h, &analysis, i_cost );//P Slice中也允许有Intra宏块，所以也要进行分析
 
             i_satd_inter = i_cost;
             i_satd_intra = X264_MIN3( analysis.i_satd_i16x16,
@@ -3218,6 +3254,7 @@ skip_analysis:
                 intra_rd( h, &analysis, i_satd_inter * 5/4 + 1 );
             }
 
+            //获取最小的代价
             COPY2_IF_LT( i_cost, analysis.i_satd_i16x16, i_type, I_16x16 );
             COPY2_IF_LT( i_cost, analysis.i_satd_i8x8, i_type, I_8x8 );
             COPY2_IF_LT( i_cost, analysis.i_satd_i4x4, i_type, I_4x4 );
@@ -3302,6 +3339,7 @@ skip_analysis:
             }
         }
     }
+    //B Slice的时候
     else if( h->sh.i_type == SLICE_TYPE_B )
     {
         int i_bskip_cost = COST_MAX;
@@ -3383,7 +3421,7 @@ skip_analysis:
             if( analysis.b_direct_available )
                 mb_analyse_inter_direct( h, &analysis );
 
-            mb_analyse_inter_b16x16( h, &analysis );
+            mb_analyse_inter_b16x16( h, &analysis );//16x16 帧间预测宏块分析--B
 
             if( h->mb.i_type == B_SKIP )
             {
@@ -3420,7 +3458,7 @@ skip_analysis:
                 if( h->param.analyse.b_mixed_references )
                     mb_analyse_inter_b8x8_mixed_ref( h, &analysis );
                 else
-                    mb_analyse_inter_b8x8( h, &analysis );
+                    mb_analyse_inter_b8x8( h, &analysis );//8x8 帧间预测宏块分析--B
 
                 COPY3_IF_LT( i_cost, analysis.i_cost8x8bi, i_type, B_8x8, i_partition, D_8x8 );
 
@@ -3470,17 +3508,17 @@ skip_analysis:
                 int try_16x8_first = i_cost_est16x8bi_total < i_cost_est8x16bi_total;
                 if( try_16x8_first && (!analysis.b_early_terminate || i_cost_est16x8bi_total < i_cost) )
                 {
-                    mb_analyse_inter_b16x8( h, &analysis, i_cost );
+                    mb_analyse_inter_b16x8( h, &analysis, i_cost );//16x8 帧间预测宏块分析--B
                     COPY3_IF_LT( i_cost, analysis.i_cost16x8bi, i_type, analysis.i_mb_type16x8, i_partition, D_16x8 );
                 }
                 if( !analysis.b_early_terminate || i_cost_est8x16bi_total < i_cost )
                 {
-                    mb_analyse_inter_b8x16( h, &analysis, i_cost );
+                    mb_analyse_inter_b8x16( h, &analysis, i_cost );//8x16 帧间预测宏块分析--B
                     COPY3_IF_LT( i_cost, analysis.i_cost8x16bi, i_type, analysis.i_mb_type8x16, i_partition, D_8x16 );
                 }
                 if( !try_16x8_first && (!analysis.b_early_terminate || i_cost_est16x8bi_total < i_cost) )
                 {
-                    mb_analyse_inter_b16x8( h, &analysis, i_cost );
+                    mb_analyse_inter_b16x8( h, &analysis, i_cost );//16x8 帧间预测宏块分析--B
                     COPY3_IF_LT( i_cost, analysis.i_cost16x8bi, i_type, analysis.i_mb_type16x8, i_partition, D_16x8 );
                 }
             }
@@ -3496,7 +3534,7 @@ skip_analysis:
                 analysis.l1.me16x16.cost -= analysis.i_lambda * i_mb_b_cost_table[B_L1_L1];
                 if( i_type == B_L0_L0 )
                 {
-                    x264_me_refine_qpel( h, &analysis.l0.me16x16 );
+                    x264_me_refine_qpel( h, &analysis.l0.me16x16 );///亚像素精度搜索
                     i_cost = analysis.l0.me16x16.cost
                            + analysis.i_lambda * i_mb_b_cost_table[B_L0_L0];
                 }
@@ -3605,7 +3643,7 @@ skip_analysis:
                 analysis.i_satd_i4x4   += analysis.i_satd_chroma;
             }
             else
-                mb_analyse_intra( h, &analysis, i_satd_inter );
+                mb_analyse_intra( h, &analysis, i_satd_inter );//B Slice中也允许有Intra宏块，所以也要进行分析
 
             if( analysis.i_mbrd )
             {
