@@ -130,3 +130,41 @@ encode()编码YUV为H.264码流，主要流程为：
 
 
 （3）、如果当前是B Slice，则进行和P Slice类似的处理。
+
+十二、总体说来x264_mb_analyse_intra()通过计算Intra16x16，Intra8x8，Intra4x4这3中帧内预测模式的代价，比较后得到最佳的帧内预测模式。该函数的大致流程如下：
+   （1）、进行Intra16X16模式的预测
+
+       a)、调用predict_16x16_mode_available()根据周围宏块的情况判断其可用的预测模式（主要检查左边和上边的块是否可用）。
+
+       b)、循环计算4种Intra16x16帧内预测模式：
+
+           i.调用predict_16x16[]()汇编函数进行Intra16x16帧内预测
+
+           ii.调用x264_pixel_function_t中的mbcmp[]()计算编码代价（mbcmp[]()指向SAD或者SATD汇编函数）。
+
+       c)、获取最小代价的Intra16x16模式。
+
+
+
+   （2）、进行Intra8x8模式的预测
+
+
+
+   （3）、进行Intra4X4块模式的预测
+
+       a)、循环处理16个4x4的块：
+
+           i.调用x264_mb_predict_intra4x4_mode()根据周围宏块情况判断该块可用的预测模式。
+
+           ii.循环计算9种Intra4x4的帧内预测模式：
+
+               1)、调用predict_4x4 []()汇编函数进行Intra4x4帧内预测
+
+               2)、调用x264_pixel_function_t中的mbcmp[]()计算编码代价（mbcmp[]()指向SAD或者SATD汇编函数）。
+
+           iii.获取最小代价的Intra4x4模式。
+
+       b)、将16个4X4块的最小代价相加，得到总代价。
+
+
+   （4）、将上述3中模式的代价进行对比，取最小者为当前宏块的帧内预测模式。
