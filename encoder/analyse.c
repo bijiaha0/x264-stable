@@ -665,11 +665,12 @@ static void mb_analyse_intra_chroma( x264_t *h, x264_mb_analysis_t *a )
 }
 
 /* FIXME: should we do any sort of merged chroma analysis with 4:4:4? */
+//功能：帧内预测:从16x16的SAD,4个8x8的SAD和，16个4x4SAD中选出最优方式
 static void mb_analyse_intra( x264_t *h, x264_mb_analysis_t *a, int i_satd_inter )
 {
     const unsigned int flags = h->sh.i_type == SLICE_TYPE_I ? h->param.analyse.intra : h->param.analyse.inter;
-    pixel *p_src = h->mb.pic.p_fenc[0];
-    pixel *p_dst = h->mb.pic.p_fdec[0];
+    pixel *p_src = h->mb.pic.p_fenc[0];//p_fenc是编码帧
+    pixel *p_dst = h->mb.pic.p_fdec[0];//p_fdec是重建帧
     static const int8_t intra_analysis_shortcut[2][2][2][5] =
     {
         {{{I_PRED_4x4_HU, -1, -1, -1, -1},
@@ -687,8 +688,26 @@ static void mb_analyse_intra( x264_t *h, x264_mb_analysis_t *a, int i_satd_inter
 
     /*---------------- Try all mode and calculate their score ---------------*/
     /* Disabled i16x16 for AVC-Intra compat */
+
+    //帧内（I帧）16x16
+    /*
+         * 16x16块
+         *
+         * +--------+--------+
+         * |                 |
+         * |                 |
+         * |                 |
+         * +        +        +
+         * |                 |
+         * |                 |
+         * |                 |
+         * +--------+--------+
+         *
+    */
     if( !h->param.i_avcintra_class )
     {
+        //获得可用的帧内预测模式-针对帧内16x16
+        //左侧是否有可用数据？上方是否有可用数据？
         const int8_t *predict_mode = predict_16x16_mode_available( h->mb.i_neighbour_intra );
 
         /* Not heavily tuned */
@@ -706,6 +725,7 @@ static void mb_analyse_intra( x264_t *h, x264_mb_analysis_t *a, int i_satd_inter
             COPY2_IF_LT( a->i_satd_i16x16, a->i_satd_i16x16_dir[2], a->i_predict16x16, 2 );
 
             /* Plane is expensive, so don't check it unless one of the previous modes was useful. */
+            //模式3：平面（一般不计算，除非前三种模式都没用）
             if( a->i_satd_i16x16 <= i16x16_thresh )
             {
                 h->predict_16x16[I_PRED_16x16_P]( p_dst );
@@ -716,20 +736,63 @@ static void mb_analyse_intra( x264_t *h, x264_mb_analysis_t *a, int i_satd_inter
         }
         else
         {
+            //遍历所有的可用的Intra16x16帧内预测模式
+            //最多4种
             for( ; *predict_mode >= 0; predict_mode++ )
             {
                 int i_satd;
                 int i_mode = *predict_mode;
 
+                //帧内预测汇编函数：根据左边和上边的像素计算出预测值
+                /*
+                 * 帧内预测举例
+                 * Vertical预测方式
+                 *    |X1 X2 ... X16
+                 *  --+---------------
+                 *    |X1 X2 ... X16
+                 *    |X1 X2 ... X16
+                 *    |.. .. ... X16
+                 *    |X1 X2 ... X16
+                 *
+                 * Horizontal预测方式
+                 *    |
+                 *  --+---------------
+                 *  X1| X1  X1 ...  X1
+                 *  X2| X2  X2 ...  X2
+                 *  ..| ..  .. ...  ..
+                 * X16|X16 X16 ... X16
+                 *
+                 * DC预测方式
+                 *    |X1 X2 ... X16
+                 *  --+---------------
+                 * X17|
+                 * X18|     Y
+                 *  ..|
+                 * X32|
+                 *
+                 * Y=(X1+X2+X3+X4+...+X31+X32)/32
+                 *
+                 */
                 if( h->mb.b_lossless )
                     x264_predict_lossless_16x16( h, 0, i_mode );
                 else
                     h->predict_16x16[i_mode]( p_dst );
 
+                //计算SAD或者是SATD（SATD(transformed)是经过Hadamard变换之后的SAD）
+                //即编码代价
+                //数据位于p_dst和p_src
                 i_satd = h->pixf.mbcmp[PIXEL_16x16]( p_src, FENC_STRIDE, p_dst, FDEC_STRIDE ) +
                          lambda * bs_size_ue( x264_mb_pred_mode16x16_fix[i_mode] );
+
+                //COPY2_IF_LT()函数的意思是“copy if little”。即如果值更小（代价更小），就拷贝。
+                //宏定义展开后如下所示
+                //if((i_satd)<(a->i_satd_i16x16))
+                //{
+                //    (a->i_satd_i16x16)=(i_satd);
+                //    (a->i_predict16x16)=(i_mode);
+                //}
                 COPY2_IF_LT( a->i_satd_i16x16, i_satd, a->i_predict16x16, i_mode );
-                a->i_satd_i16x16_dir[i_mode] = i_satd;
+                a->i_satd_i16x16_dir[i_mode] = i_satd;//每种模式的代价都会存储
             }
         }
 
@@ -743,6 +806,7 @@ static void mb_analyse_intra( x264_t *h, x264_mb_analysis_t *a, int i_satd_inter
 
     uint16_t *cost_i4x4_mode = h->cost_table->i4x4_mode[a->i_qp] + 8;
     /* 8x8 prediction selection */
+    //帧内（I帧）8x8
     if( flags & X264_ANALYSE_I8x8 )
     {
         ALIGNED_ARRAY_32( pixel, edge,[36] );
@@ -862,6 +926,22 @@ static void mb_analyse_intra( x264_t *h, x264_mb_analysis_t *a, int i_satd_inter
     }
 
     /* 4x4 prediction selection */
+    //帧内（I帧）4x4
+    /*
+         * 16x16 宏块被划分为16个4x4子块
+         *
+         * +----+----+----+----+
+         * |    |    |    |    |
+         * +----+----+----+----+
+         * |    |    |    |    |
+         * +----+----+----+----+
+         * |    |    |    |    |
+         * +----+----+----+----+
+         * |    |    |    |    |
+         * +----+----+----+----+
+         *
+         */
+    /********************************************************************/
     if( flags & X264_ANALYSE_I4x4 )
     {
         int i_cost = lambda * (24+16); /* 24from JVT (SATD0), 16 from base predmode costs */
@@ -874,13 +954,21 @@ static void mb_analyse_intra( x264_t *h, x264_mb_analysis_t *a, int i_satd_inter
         if( h->sh.i_type == SLICE_TYPE_B )
             i_cost += lambda * i_mb_b_cost_table[I_4x4];
 
+        //循环所有的4x4块
         for( idx = 0;; idx++ )
         {
+            //编码帧中的像素
+            //block_idx_xy_fenc[]记录了4x4小块在p_fenc中的偏移地址
             pixel *p_src_by = p_src + block_idx_xy_fenc[idx];
+
+            //重建帧中的像素
+            //block_idx_xy_fdec[]记录了4x4小块在p_fdec中的偏移地址
             pixel *p_dst_by = p_dst + block_idx_xy_fdec[idx];
             int i_best = COST_MAX;
             int i_pred_mode = x264_mb_predict_intra4x4_mode( h, idx );
 
+            //获得可用的帧内预测模式-针对帧内4x4
+            //左侧是否有可用数据？上方是否有可用数据？
             const int8_t *predict_mode = predict_4x4_mode_available( a->b_avoid_topright, h->mb.i_neighbour4[idx], idx );
 
             if( (h->mb.i_neighbour4[idx] & (MB_TOPRIGHT|MB_TOP)) == MB_TOP )
@@ -931,6 +1019,9 @@ static void mb_analyse_intra( x264_t *h, x264_mb_analysis_t *a, int i_satd_inter
                         else
                             h->predict_4x4[i_mode]( p_dst_by );
 
+                        //计算SAD或者是SATD（SATD（Transformed）是经过Hadamard变换之后的SAD）
+                        //即编码代价
+                        //p_src_by编码帧，p_dst_by重建帧
                         i_satd = h->pixf.mbcmp[PIXEL_4x4]( p_src_by, FENC_STRIDE, p_dst_by, FDEC_STRIDE );
                         if( i_pred_mode == x264_mb_pred_mode4x4_fix(i_mode) )
                         {
@@ -943,10 +1034,23 @@ static void mb_analyse_intra( x264_t *h, x264_mb_analysis_t *a, int i_satd_inter
                             }
                         }
 
+
+                        //COPY2_IF_LT()函数的意思是“copy if little”。即如果值更小（代价更小），就拷贝。
+                        //宏定义展开后如下所示
+                        //if((i_satd)<(i_best))
+                        //{
+                        //    (i_best)=(i_satd);
+                        //    (a->i_predict4x4[idx])=(i_mode);
+                        //}
+
+                        //看看代价是否更小
+                        //i_best中存储了最小的代价值
+                        //i_predict4x4[idx]中存储了代价最小的预测模式（idx为4x4小块的序号）
                         COPY2_IF_LT( i_best, i_satd, a->i_predict4x4[idx], i_mode );
                     }
                 }
 
+                //累加各个4x4块的代价（累加每个块的最小代价）
                 i_cost += i_best + 3 * lambda;
                 if( i_cost > i_satd_thresh || idx == 15 )
                     break;
@@ -954,13 +1058,29 @@ static void mb_analyse_intra( x264_t *h, x264_mb_analysis_t *a, int i_satd_inter
                     x264_predict_lossless_4x4( h, p_dst_by, 0, idx, a->i_predict4x4[idx] );
                 else
                     h->predict_4x4[a->i_predict4x4[idx]]( p_dst_by );
+
+                /*
+                 * 将mode填充至intra4x4_pred_mode_cache
+                 *
+                 * 用简单图形表示intra4x4_pred_mode_cache如下。数字代表填充顺序（一共填充16次）
+                 *   |
+                 * --+-------------------
+                 *   | 0 0 0 0  0  0  0  0
+                 *   | 0 0 0 0  1  2  5  6
+                 *   | 0 0 0 0  3  4  7  8
+                 *   | 0 0 0 0  9 10 13 14
+                 *   | 0 0 0 0 11 12 15 16
+                 *
+                 */
                 h->mb.cache.intra4x4_pred_mode[x264_scan8[idx]] = a->i_predict4x4[idx];
             }
             /* we need to encode this block now (for next ones) */
             x264_mb_encode_i4x4( h, 0, idx, a->i_qp, a->i_predict4x4[idx], 0 );
         }
+        //处理最后一个4x4小块（一共16个块）
         if( idx == 15 )
         {
+            //开销（累加完的）
             a->i_satd_i4x4 = i_cost;
             if( h->mb.i_skip_intra )
             {
