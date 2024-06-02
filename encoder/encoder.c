@@ -2851,11 +2851,14 @@ static intptr_t slice_write( x264_t *h )
     i_mb_x = h->sh.i_first_mb % h->mb.i_mb_width;
     i_skip = 0;
 
+    //一个大循环
+    //对一个slice中每个宏块进行编码
     while( 1 )
     {
+        //宏块序号。由i_mb_x和i_mb_y计算而来。
         mb_xy = i_mb_x + i_mb_y * h->mb.i_mb_width;
         int mb_spos = bs_pos(&h->out.bs) + x264_cabac_pos(&h->cabac);
-
+        //一行的开始
         if( i_mb_x == 0 )
         {
             if( bitstream_check_buffer( h ) )
@@ -2863,7 +2866,7 @@ static intptr_t slice_write( x264_t *h )
             if( !(i_mb_y & SLICE_MBAFF) && h->param.rc.i_vbv_buffer_size )
                 bitstream_backup( h, &bs_bak[BS_BAK_ROW_VBV], i_skip, 1 );
             if( !h->mb.b_reencode_mb )
-                fdec_filter_row( h, i_mb_y, 0 );
+                fdec_filter_row( h, i_mb_y, 0 );//滤波模块。该模块包含了环路滤波，半像素插值，SSIM/PSNR的计算(一次处理一行宏块)
         }
 
         if( back_up_bitstream )
@@ -2895,17 +2898,19 @@ static intptr_t slice_write( x264_t *h )
         }
 
         /* load cache */
+        //将要编码的宏块的周围的宏块的值读进来
+        //主要是上面、左边块的值
         if( SLICE_MBAFF )
-            x264_macroblock_cache_load_interlaced( h, i_mb_x, i_mb_y );
+            x264_macroblock_cache_load_interlaced( h, i_mb_x, i_mb_y );//将要编码的宏块的周围的宏块的信息读进来
         else
-            x264_macroblock_cache_load_progressive( h, i_mb_x, i_mb_y );
+            x264_macroblock_cache_load_progressive( h, i_mb_x, i_mb_y );//将要编码的宏块的周围的宏块的信息读进来
 
-        x264_macroblock_analyse( h );
+        x264_macroblock_analyse( h );//分析模块。该模块包含了帧内预测模式分析以及帧间运动估计等
 
         /* encode this macroblock -> be careful it can change the mb type to P_SKIP if needed */
 reencode:
-        x264_macroblock_encode( h );
-
+        x264_macroblock_encode( h );//宏块编码模块。该模块通过对残差的DCT变换、量化等方式对宏块进行编码
+        //输出CABAC
         if( h->param.b_cabac )
         {
             if( mb_xy > h->sh.i_first_mb && !(SLICE_MBAFF && (i_mb_y&1)) )
@@ -2917,11 +2922,12 @@ reencode:
             {
                 if( h->sh.i_type != SLICE_TYPE_I )
                     x264_cabac_mb_skip( h, 0 );
-                x264_macroblock_write_cabac( h, &h->cabac );
+                x264_macroblock_write_cabac( h, &h->cabac );//CABAC熵编码模块
             }
         }
         else
         {
+            //输出CAVLC
             if( IS_SKIP( h->mb.i_type ) )
                 i_skip++;
             else
@@ -2931,7 +2937,7 @@ reencode:
                     bs_write_ue( &h->out.bs, i_skip );  /* skip run */
                     i_skip = 0;
                 }
-                x264_macroblock_write_cavlc( h );
+                x264_macroblock_write_cavlc( h );//CAVLC熵编码模块
                 /* If there was a CAVLC level code overflow, try again at a higher QP. */
                 if( h->mb.b_overflow )
                 {
@@ -3011,9 +3017,11 @@ cont:
         h->mb.b_reencode_mb = 0;
 
         /* save cache */
-        x264_macroblock_cache_save( h );
+        //保存当前宏块的的值，用于以后的宏块的编码
+        //包括Intra4x4宏块帧内预测模式，DCT非零系数，运动矢量，参考帧序号等等
+        x264_macroblock_cache_save( h );//保存当前宏块的信息
 
-        if( x264_ratecontrol_mb( h, mb_size ) < 0 )
+        if( x264_ratecontrol_mb( h, mb_size ) < 0 )//码率控制
         {
             bitstream_restore( h, &bs_bak[BS_BAK_ROW_VBV], &i_skip, 1 );
             h->mb.b_reencode_mb = 1;
@@ -3025,6 +3033,7 @@ cont:
         }
 
         /* accumulate mb stats */
+        //对stat结构体中的统计信息进行赋值
         h->stat.frame.i_mb_count[h->mb.i_type]++;
 
         int b_intra = IS_INTRA( h->mb.i_type );
@@ -3092,13 +3101,15 @@ cont:
                 h->stat.frame.i_mb_pred_mode[3][x264_mb_chroma_pred_mode_fix[h->mb.i_chroma_pred_mode]]++;
             }
             h->stat.frame.i_mb_field[b_intra?0:b_skip?2:1] += MB_INTERLACED;
-        }
+        }//对stat结构体中的统计信息进行赋值结束
 
         /* calculate deblock strength values (actual deblocking is done per-row along with hpel) */
+        //计算去块效应滤波器强度Bs
+        //这里没有滤波
         if( b_deblock )
             x264_macroblock_deblock_strength( h );
 
-        if( mb_xy == h->sh.i_last_mb )
+        if( mb_xy == h->sh.i_last_mb )//如果处理完最后一个宏块，就跳出大循环
             break;
 
         if( SLICE_MBAFF )
@@ -3107,11 +3118,12 @@ cont:
             i_mb_y ^= i_mb_x < h->mb.i_mb_width;
         }
         else
-            i_mb_x++;
-        if( i_mb_x == h->mb.i_mb_width )
+            i_mb_x++;//宏块序号x加1
+        if( i_mb_x == h->mb.i_mb_width )//处理完一行宏块
         {
-            i_mb_y++;
-            i_mb_x = 0;
+            //该处理下一行了
+            i_mb_y++;//宏块序号y加1
+            i_mb_x = 0;//宏块序号x设置为0
         }
     }
     if( h->sh.i_last_mb < h->sh.i_first_mb )
@@ -3119,7 +3131,7 @@ cont:
 
     h->out.nal[h->out.i_nal].i_last_mb = h->sh.i_last_mb;
 
-    if( h->param.b_cabac )
+    if( h->param.b_cabac )//熵编码的收尾工作
     {
         x264_cabac_encode_flush( h, &h->cabac );
         h->out.bs.p = h->cabac.p;
@@ -3132,7 +3144,9 @@ cont:
         bs_rbsp_trailing( &h->out.bs );
         bs_flush( &h->out.bs );
     }
-    if( nal_end( h ) )
+    //结束输出一个NAL
+    //前面对应着x264_nal_start()
+    if( nal_end( h ) )//结束写一个NALU
         return -1;
 
     if( h->sh.i_last_mb == (h->i_threadslice_end * h->mb.i_mb_width - 1) )
