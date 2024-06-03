@@ -72,6 +72,16 @@ void x264_predict_16x16_dc_c( pixel *src )
     }
     pixel4 dcsplat = PIXEL_SPLAT_X4( ( dc + 16 ) >> 5 );
 
+    /* 展开宏定义如下：
+     * uint32_t dcsplat = ((dc + 16) >> 5) * 0x01010101U;
+     * for ( int i = 0; i < 16; i++ ) {
+     *     ((x264_union32_t*)(src +  0))->i = v;
+     *     ((x264_union32_t*)(src +  4))->i = v;
+     *     ((x264_union32_t*)(src +  8))->i = v;
+     *     ((x264_union32_t*)(src + 12))->i = v;
+     *     src += FDEC_STRIDE;
+     * }
+     */
     PREDICT_16x16_DC( dcsplat );
 }
 static void predict_16x16_dc_left_c( pixel *src )
