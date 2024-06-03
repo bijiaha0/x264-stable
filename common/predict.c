@@ -107,6 +107,13 @@ void x264_predict_16x16_h_c( pixel *src )
         MPIXEL_X4( src+ 4 ) = v;
         MPIXEL_X4( src+ 8 ) = v;
         MPIXEL_X4( src+12 ) = v;
+        /* 展开宏定义如下：
+         * uint32_t v = src[-1] * 0x01010101U;
+         * ((x264_union32_t*)(src +  0))->i = v;
+         * ((x264_union32_t*)(src +  4))->i = v;
+         * ((x264_union32_t*)(src +  8))->i = v;
+         * ((x264_union32_t*)(src + 12))->i = v;
+         */
         src += FDEC_STRIDE;
     }
 }
