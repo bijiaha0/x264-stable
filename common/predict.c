@@ -117,6 +117,30 @@ void x264_predict_16x16_v_c( pixel *src )
     pixel4 v2 = MPIXEL_X4( &src[ 8-FDEC_STRIDE] );
     pixel4 v3 = MPIXEL_X4( &src[12-FDEC_STRIDE] );
 
+    /*
+     * Vertical 预测方式
+     *   |X1 X2 X3 X4
+     * --+-----------
+     *   |X1 X2 X3 X4
+     *   |X1 X2 X3 X4
+     *   |X1 X2 X3 X4
+     *   |X1 X2 X3 X4
+     *
+     * 展开宏定义如下：
+     * uint32_t v0 = ((x264_union32_t*)(&src[ 0-FDEC_STRIDE]))->i;
+     * uint32_t v1 = ((x264_union32_t*)(&src[ 4-FDEC_STRIDE]))->i;
+     * uint32_t v2 = ((x264_union32_t*)(&src[ 8-FDEC_STRIDE]))->i;
+     * uint32_t v3 = ((x264_union32_t*)(&src[12-FDEC_STRIDE]))->i;
+     * x264_union32_t 的定义如下：
+     * typedef union {uint64_t i; uint32_t d[2]; uint16_t w[4]; uint8_t b[8]; } MAY_ALIAS x264_union64_t;
+     * 即将一行 16 字节数据分成 4 次，每次取出 4 个像素（一共 16 个像素），分别赋值给 v0，v1，v2，v3
+     * 取出的值源自于 16x16 块上面的一行像素
+     *    0|          4          8          12         16
+     *    ||    v0    |    v1    |    v2    |    v3    |
+     * ---++==========+==========+==========+==========+
+     *    ||
+     *    ||
+     */
     for( int i = 0; i < 16; i++ )
     {
         MPIXEL_X4( src+ 0 ) = v0;
