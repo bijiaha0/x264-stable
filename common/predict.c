@@ -112,6 +112,7 @@ void x264_predict_16x16_h_c( pixel *src )
 }
 void x264_predict_16x16_v_c( pixel *src )
 {
+    // pixel4 实际上是 uint32_t（占用 32bit），存储 4 个像素的值（每个像素占用 8bit）
     pixel4 v0 = MPIXEL_X4( &src[ 0-FDEC_STRIDE] );
     pixel4 v1 = MPIXEL_X4( &src[ 4-FDEC_STRIDE] );
     pixel4 v2 = MPIXEL_X4( &src[ 8-FDEC_STRIDE] );
@@ -147,6 +148,13 @@ void x264_predict_16x16_v_c( pixel *src )
         MPIXEL_X4( src+ 4 ) = v1;
         MPIXEL_X4( src+ 8 ) = v2;
         MPIXEL_X4( src+12 ) = v3;
+    /* 展开宏定义如下：
+     * ((x264_union32_t*)(src +  0))->i = v0;
+     * ((x264_union32_t*)(src +  4))->i = v1;
+     * ((x264_union32_t*)(src +  8))->i = v2;
+     * ((x264_union32_t*)(src + 12))->i = v3;
+     * 即分成 4 次，每次赋值 4 个像素
+     */
         src += FDEC_STRIDE;
     }
 }
